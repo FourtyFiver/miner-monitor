@@ -134,8 +134,13 @@ def extract_miner_data(host: str, port: int) -> dict | None:
 
     # ccminer text format: flat KEY=VALUE dict
     if "KHS" in summary:
-        data["hashrate"] = float(summary.get("KHS", 0))
-        data["hashrate_unit"] = "KH/s"
+        khs = float(summary.get("KHS", 0))
+        if khs >= 1000:
+            data["hashrate"] = round(khs / 1000, 2)
+            data["hashrate_unit"] = "MH/s"
+        else:
+            data["hashrate"] = khs
+            data["hashrate_unit"] = "KH/s"
         data["accepted"] = int(summary.get("ACC", 0))
         data["rejected"] = int(summary.get("REJ", 0))
         data["elapsed"] = int(summary.get("UPTIME", 0))
@@ -253,7 +258,7 @@ class MQTTPublisher:
         sensors = {
             "hashrate": {
                 "name": f"{miner_name} Hashrate",
-                "unit_of_measurement": data.get("hashrate_unit", "KH/s"),
+                "unit_of_measurement": "KH/s",
                 "icon": "mdi:speedometer",
                 "state_class": "measurement",
             },
