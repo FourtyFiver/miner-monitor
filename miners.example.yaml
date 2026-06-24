@@ -1,0 +1,18 @@
+# Miner configuration
+# Add your miners here. The monitor polls each miner's cgminer API (port 4028).
+miners:
+  - name: z9mini_1
+    host: 10.50.13.202
+    port: 4028
+
+  - name: z9mini_2
+    host: 10.50.13.203
+    port: 4028
+
+  - name: ipollo_v1_1
+    host: 10.50.13.200
+    port: 4028
+
+  - name: ipollo_v1_2
+    host: 10.50.13.201
+    port: 4028

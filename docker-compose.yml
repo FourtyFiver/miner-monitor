@@ -1,0 +1,17 @@
+services:
+  miner-monitor:
+    build: .
+    container_name: miner-monitor
+    restart: unless-stopped
+    volumes:
+      - ./miners.yaml:/config/miners.yaml:ro
+      - ./.env:/config/.env:ro
+    environment:
+      - TZ=Europe/Berlin
+      # MQTT settings can also be set here (overrides .env)
+      # - MQTT_HOST=192.168.1.100
+      # - MQTT_PORT=1883
+      # - MQTT_USER=mqtt_user
+      # - MQTT_PASSWORD=your_password
+      # - MQTT_PREFIX=homeassistant
+      # - POLL_INTERVAL=60
