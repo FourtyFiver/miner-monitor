@@ -50,18 +50,34 @@ CGMINER_MAGIC = struct.pack(b"4s", b"\x00\x00\x00\x00")
 
 
 def cgminer_request(host: str, port: int, command: str, timeout: float = 5.0) -> dict | None:
-    """Send a JSON-RPC command to a cgminer-compatible miner on port 4028."""
+    """Send a JSON-RPC command to a cgminer/ccminer-compatible miner.
+
+    Supports two wire formats:
+      - cgminer: 4-byte magic + 4-byte length + JSON (port 4028)
+      - ccminer: 4-byte length + JSON, no magic (port 4068)
+    """
     payload = json.dumps({"command": command}) + "\n"
     try:
         sock = socket.create_connection((host, port), timeout=timeout)
         sock.settimeout(timeout)
-        # cgminer expects a 4-byte magic + 4-byte length prefix
-        sock.send(CGMINER_MAGIC + struct.pack(b"<I", len(payload)) + payload.encode())
-        # Read response: 4-byte magic + 4-byte length + JSON
-        raw = sock.recv(4)  # magic
+        # Try with magic first (cgminer), fall back to length-only (ccminer)
+        try:
+            sock.send(CGMINER_MAGIC + struct.pack(b"<I", len(payload)) + payload.encode())
+        except BrokenPipeError:
+            sock.close()
+            sock = socket.create_connection((host, port), timeout=timeout)
+            sock.settimeout(timeout)
+            sock.send(struct.pack(b"<I", len(payload)) + payload.encode())
+
+        # Read response: try 4-byte magic first, then length-only
+        raw = sock.recv(4)
         if len(raw) < 4:
             return None
-        raw_len = sock.recv(4)
+        # Check if first 4 bytes are the magic header
+        if raw == CGMINER_MAGIC:
+            raw_len = sock.recv(4)
+        else:
+            raw_len = raw
         if len(raw_len) < 4:
             return None
         resp_len = struct.unpack(b"<I", raw_len)[0]
