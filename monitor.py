@@ -50,45 +50,60 @@ CGMINER_MAGIC = struct.pack(b"4s", b"\x00\x00\x00\x00")
 
 
 def cgminer_request(host: str, port: int, command: str, timeout: float = 5.0) -> dict | None:
-    """Send a JSON-RPC command to a cgminer/ccminer-compatible miner.
+    """Send a command to a cgminer/ccminer-compatible miner.
 
-    Supports two wire formats:
+    Supports three wire formats:
       - cgminer: 4-byte magic + 4-byte length + JSON (port 4028)
-      - ccminer: 4-byte length + JSON, no magic (port 4068)
+      - ccminer: raw text command + null byte, response is KEY=VALUE; pairs
     """
-    payload = json.dumps({"command": command}) + "\n"
     try:
         sock = socket.create_connection((host, port), timeout=timeout)
         sock.settimeout(timeout)
-        # Try with magic first (cgminer), fall back to length-only (ccminer)
+
+        # Try JSON format first (cgminer)
+        payload = json.dumps({"command": command}) + "\n"
         try:
             sock.send(CGMINER_MAGIC + struct.pack(b"<I", len(payload)) + payload.encode())
-        except BrokenPipeError:
+        except (BrokenPipeError, OSError):
+            # ccminer: close and reconnect with raw text
             sock.close()
             sock = socket.create_connection((host, port), timeout=timeout)
             sock.settimeout(timeout)
-            sock.send(struct.pack(b"<I", len(payload)) + payload.encode())
+            sock.send(command.encode() + b"\x00")
 
-        # Read response: try 4-byte magic first, then length-only
-        raw = sock.recv(4)
-        if len(raw) < 4:
-            return None
-        # Check if first 4 bytes are the magic header
-        if raw == CGMINER_MAGIC:
-            raw_len = sock.recv(4)
-        else:
-            raw_len = raw
-        if len(raw_len) < 4:
-            return None
-        resp_len = struct.unpack(b"<I", raw_len)[0]
-        resp_data = b""
-        while len(resp_data) < resp_len:
-            chunk = sock.recv(resp_len - len(resp_data))
-            if not chunk:
-                break
-            resp_data += chunk
+        # Read response
+        resp = b""
+        try:
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                resp += chunk
+        except socket.timeout:
+            pass
         sock.close()
-        return json.loads(resp_data.decode().strip("\x00"))
+
+        if not resp:
+            return None
+
+        text = resp.decode().strip().strip("\x00")
+
+        # Try JSON parse first
+        if text.startswith("{"):
+            return json.loads(text)
+
+        # ccminer text format: KEY=VALUE;KEY=VALUE;...|
+        if "=" in text:
+            result = {}
+            pairs = text.replace("|", ";").split(";")
+            for pair in pairs:
+                pair = pair.strip()
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    result[k.strip()] = v.strip()
+            return result
+
+        return None
     except (socket.timeout, ConnectionRefusedError, OSError, json.JSONDecodeError) as exc:
         log.debug("cgminer request to %s:%s (%s) failed: %s", host, port, command, exc)
         return None
@@ -100,14 +115,29 @@ def cgminer_request(host: str, port: int, command: str, timeout: float = 5.0) ->
 def extract_miner_data(host: str, port: int) -> dict | None:
     """Poll a miner and return a flat dict of sensor values, or None if offline."""
     summary = cgminer_request(host, port, "summary")
-    if not summary or "SUMMARY" not in summary:
+    if not summary:
+        return None
+
+    data: dict[str, Any] = {
+        "online": True,
+    }
+
+    # ccminer text format: flat KEY=VALUE dict
+    if "KHS" in summary:
+        data["hashrate"] = float(summary.get("KHS", 0))
+        data["hashrate_unit"] = "KH/s"
+        data["accepted"] = int(summary.get("ACC", 0))
+        data["rejected"] = int(summary.get("REJ", 0))
+        data["elapsed"] = int(summary.get("UPTIME", 0))
+        data["pool_alive"] = int(summary.get("POOLS", 0)) > 0
+        return data
+
+    # cgminer JSON format
+    if "SUMMARY" not in summary:
         return None
 
     s = summary["SUMMARY"][0]
-    data: dict[str, Any] = {
-        "online": True,
-        "elapsed": s.get("Elapsed", 0),
-    }
+    data["elapsed"] = s.get("Elapsed", 0)
 
     # Hashrate — Z9 reports GHS, iPollo reports MHS
     for key in ("GHS 5s", "GHS av", "MHS av", "MHS 1m", "MHS 5m", "MHS 15m"):
