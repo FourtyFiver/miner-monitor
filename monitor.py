@@ -60,20 +60,10 @@ def cgminer_request(host: str, port: int, command: str, timeout: float = 5.0) ->
         sock = socket.create_connection((host, port), timeout=timeout)
         sock.settimeout(timeout)
 
-        # Try JSON format first (cgminer)
-        payload = json.dumps({"command": command}) + "\n"
-        try:
-            sock.send(CGMINER_MAGIC + struct.pack(b"<I", len(payload)) + payload.encode())
-        except (BrokenPipeError, OSError):
-            # ccminer: close and reconnect with raw text
-            sock.close()
-            sock = socket.create_connection((host, port), timeout=timeout)
-            sock.settimeout(timeout)
-            sock.send(command.encode() + b"\x00")
-
-        # Read response
+        # Try ccminer raw text format first (fails fast if wrong)
         resp = b""
         try:
+            sock.send(command.encode() + b"\x00")
             while True:
                 chunk = sock.recv(4096)
                 if not chunk:
@@ -81,29 +71,49 @@ def cgminer_request(host: str, port: int, command: str, timeout: float = 5.0) ->
                 resp += chunk
         except socket.timeout:
             pass
-        sock.close()
 
-        if not resp:
+        if resp:
+            sock.close()
+            text = resp.decode().strip().strip("\x00")
+            if "=" in text:
+                result = {}
+                pairs = text.replace("|", ";").split(";")
+                for pair in pairs:
+                    pair = pair.strip()
+                    if "=" in pair:
+                        k, v = pair.split("=", 1)
+                        result[k.strip()] = v.strip()
+                return result
+            if text.startswith("{"):
+                return json.loads(text)
             return None
 
-        text = resp.decode().strip().strip("\x00")
-
-        # Try JSON parse first
-        if text.startswith("{"):
-            return json.loads(text)
-
-        # ccminer text format: KEY=VALUE;KEY=VALUE;...|
-        if "=" in text:
-            result = {}
-            pairs = text.replace("|", ";").split(";")
-            for pair in pairs:
-                pair = pair.strip()
-                if "=" in pair:
-                    k, v = pair.split("=", 1)
-                    result[k.strip()] = v.strip()
-            return result
-
-        return None
+        # No response from ccminer format → try cgminer JSON format
+        sock.close()
+        sock = socket.create_connection((host, port), timeout=timeout)
+        sock.settimeout(timeout)
+        payload = json.dumps({"command": command}) + "\n"
+        sock.send(CGMINER_MAGIC + struct.pack(b"<I", len(payload)) + payload.encode())
+        raw = sock.recv(4)
+        if len(raw) < 4:
+            sock.close()
+            return None
+        if raw == CGMINER_MAGIC:
+            raw_len = sock.recv(4)
+        else:
+            raw_len = raw
+        if len(raw_len) < 4:
+            sock.close()
+            return None
+        resp_len = struct.unpack(b"<I", raw_len)[0]
+        resp = b""
+        while len(resp) < resp_len:
+            chunk = sock.recv(resp_len - len(resp))
+            if not chunk:
+                break
+            resp += chunk
+        sock.close()
+        return json.loads(resp.decode().strip("\x00"))
     except (socket.timeout, ConnectionRefusedError, OSError, json.JSONDecodeError) as exc:
         log.debug("cgminer request to %s:%s (%s) failed: %s", host, port, command, exc)
         return None
