@@ -255,7 +255,6 @@ class MQTTPublisher:
                 "name": f"{miner_name} Hashrate",
                 "unit_of_measurement": data.get("hashrate_unit", "KH/s"),
                 "icon": "mdi:speedometer",
-                "device_class": "power",
                 "state_class": "measurement",
             },
             "accepted": {
