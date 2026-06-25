@@ -133,7 +133,39 @@ def extract_miner_data(host: str, port: int) -> dict | None:
     }
 
     # ccminer text format: flat KEY=VALUE dict
-    if "KHS" in summary or "GHS" in summary or "MHS" in summary:
+    # Z9 Mini liefert: STATUS=S,...,Description=...|SUMMARY,Elapsed=5044,GHS 5s=13.48,...
+    # Nach |->; Split wird SUMMARY,Elapsed=5044 zum Key — die Komma-Felder müssen extra geparst werden
+    has_hashrate_key = any(
+        k.startswith(prefix) for k in summary for prefix in ["KHS", "GHS", "MHS"]
+    )
+    # Fallback: Komma-getrennte Felder im SUMMARY-Eintrag parsen
+    if not has_hashrate_key:
+        for k, v in list(summary.items()):
+            if k.startswith("SUMMARY") and "," in k:
+                # "SUMMARY,Elapsed=5044,GHS 5s=13.48,..." — der erste Teil vor = ist der Rest-Key
+                # Alles nach dem ersten = sind komma-getrennte Subfelder
+                eq_idx = v.find("=")
+                if eq_idx == -1:
+                    # Format: SUMMARY,Elapsed=5044,GHS 5s=13.48
+                    # Der Key ist "SUMMARY,Elapsed", Value ist "5044"
+                    # Aber die restlichen Felder stecken im Value
+                    pass
+                # Alternative: den ganzen Eintrag als CSV parsen
+                # "SUMMARY,Elapsed=5044,GHS 5s=13.48,GHS av=12.46,..."
+                # -> erstes Komma trennt "SUMMARY" vom Rest
+                rest = k[k.index(",")+1:]  # "Elapsed=5044,GHS 5s=13.48,..."
+                # Komma-getrennte Paare parsen
+                pairs2 = rest.split(",")
+                for pair in pairs2:
+                    if "=" in pair:
+                        sk, sv = pair.split("=", 1)
+                        summary[sk.strip()] = sv.strip()
+        # Nach Fallback-Parsing nochmal prüfen
+        has_hashrate_key = any(
+            k.startswith(prefix) for k in summary for prefix in ["KHS", "GHS", "MHS"]
+        )
+
+    if has_hashrate_key:
         for key_pattern, unit in [("KHS", "KH/s"), ("GHS", "GH/s"), ("MHS", "MH/s")]:
             matching_keys = [k for k in summary if k.startswith(key_pattern)]
             if matching_keys:
