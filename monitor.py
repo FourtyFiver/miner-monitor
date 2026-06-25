@@ -186,6 +186,14 @@ def extract_miner_data(host: str, port: int) -> dict | None:
         # Auch bei ccminer-Format: Stats für Temp/Fan abfragen
         stats = cgminer_request(host, port, "stats")
         if stats:
+            # Stats hat auch Komma-getrennte Felder (STATS,ID=0,fan1=4200,...)
+            for k, v in list(stats.items()):
+                if "," in v and "=" in v:
+                    pairs2 = v.split(",")
+                    for pair in pairs2:
+                        if "=" in pair:
+                            sk, sv = pair.split("=", 1)
+                            stats[sk.strip()] = sv.strip()
             for k, v in stats.items():
                 if k.startswith("temp") and not k.startswith("temp2"):
                     try:
