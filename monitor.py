@@ -165,7 +165,10 @@ def extract_miner_data(host: str, port: int) -> dict | None:
                 multiplier = 1.0
                 for suffix, factor in [("P", 1e15), ("T", 1e12), ("G", 1e9), ("M", 1e6), ("K", 1e3)]:
                     if raw_val.endswith(suffix):
-                        multiplier = factor
+                        # Nur multiplizieren wenn die Einheit nicht schon passt
+                        # z.B. MHS av=136.5566M → M suffix, aber Einheit ist MH/s → Wert ist 136.5566
+                        if not (unit.startswith(suffix[0]) and suffix in ("M", "K", "G")):
+                            multiplier = factor
                         raw_val = raw_val[:-1]
                         break
                 try:
