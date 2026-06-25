@@ -333,7 +333,7 @@ class MQTTPublisher:
         sensors = {
             "hashrate": {
                 "name": f"{miner_name} Hashrate",
-                "unit_of_measurement": "KH/s",
+                "unit_of_measurement": data.get("hashrate_unit", "KH/s"),
                 "icon": "mdi:speedometer",
                 "state_class": "measurement",
             },
