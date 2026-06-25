@@ -177,6 +177,10 @@ def extract_miner_data(host: str, port: int) -> dict | None:
                     val = 0.0
                 data["hashrate"] = val
                 data["hashrate_unit"] = unit
+                # Z9 Mini: GH/s → KH/s für HA-Kompatibilität
+                if unit == "GH/s":
+                    data["hashrate"] = val * 1000
+                    data["hashrate_unit"] = "KH/s"
                 break
         data["accepted"] = int(summary.get("ACC", 0))
         data["rejected"] = int(summary.get("REJ", 0))
@@ -233,7 +237,13 @@ def extract_miner_data(host: str, port: int) -> dict | None:
     for key in ("GHS 5s", "GHS av", "MHS av", "MHS 1m", "MHS 5m", "MHS 15m"):
         if key in s:
             data["hashrate"] = float(s[key])
-            data["hashrate_unit"] = "GH/s" if key.startswith("GHS") else "MH/s"
+            hr_unit = "GH/s" if key.startswith("GHS") else "MH/s"
+            # Z9 Mini: GH/s → KH/s für HA-Kompatibilität
+            if hr_unit == "GH/s":
+                data["hashrate"] = float(s[key]) * 1000
+                data["hashrate_unit"] = "KH/s"
+            else:
+                data["hashrate_unit"] = hr_unit
             break
 
     data["accepted"] = s.get("Accepted", 0)
