@@ -159,7 +159,19 @@ def extract_miner_data(host: str, port: int) -> dict | None:
         for key_pattern, unit in [("KHS", "KH/s"), ("GHS", "GH/s"), ("MHS", "MH/s")]:
             matching_keys = [k for k in summary if k.startswith(key_pattern)]
             if matching_keys:
-                val = float(summary.get(matching_keys[0], 0))
+                raw_val = summary.get(matching_keys[0], "0")
+                # Suffix entfernen: 134.9204M, 12.46G, 500K
+                raw_val = raw_val.strip().upper()
+                multiplier = 1.0
+                for suffix, factor in [("P", 1e15), ("T", 1e12), ("G", 1e9), ("M", 1e6), ("K", 1e3)]:
+                    if raw_val.endswith(suffix):
+                        multiplier = factor
+                        raw_val = raw_val[:-1]
+                        break
+                try:
+                    val = float(raw_val) * multiplier
+                except ValueError:
+                    val = 0.0
                 data["hashrate"] = val
                 data["hashrate_unit"] = unit
                 break
