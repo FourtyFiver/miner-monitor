@@ -135,25 +135,20 @@ def extract_miner_data(host: str, port: int) -> dict | None:
     # ccminer text format: flat KEY=VALUE dict
     # Z9 Mini liefert: STATUS=S,...,Description=...|SUMMARY,Elapsed=5044,GHS 5s=13.48,...
     # Nach |->; Split wird SUMMARY,Elapsed=5044 zum Key — die Komma-Felder müssen extra geparst werden
+    # Fallback: Komma-getrennte Felder im SUMMARY-Eintrag parsen
+    # Wird IMMER ausgeführt, nicht nur wenn has_hashrate_key False ist
+    for k, v in list(summary.items()):
+        if k.startswith("SUMMARY") and "," in k:
+            rest = v
+            pairs2 = rest.split(",")
+            for pair in pairs2:
+                if "=" in pair:
+                    sk, sv = pair.split("=", 1)
+                    summary[sk.strip()] = sv.strip()
+
     has_hashrate_key = any(
         k.startswith(prefix) for k in summary for prefix in ["KHS", "GHS", "MHS"]
     )
-    # Fallback: Komma-getrennte Felder im SUMMARY-Eintrag parsen
-    if not has_hashrate_key:
-        for k, v in list(summary.items()):
-            if k.startswith("SUMMARY") and "," in k:
-                # Key ist "SUMMARY,Elapsed", Value ist "5044,GHS 5s=13.48,GHS av=12.46,..."
-                # Alles nach dem ersten = im Value sind die restlichen Felder
-                rest = v  # "5044,GHS 5s=13.48,GHS av=12.46,..."
-                pairs2 = rest.split(",")
-                for pair in pairs2:
-                    if "=" in pair:
-                        sk, sv = pair.split("=", 1)
-                        summary[sk.strip()] = sv.strip()
-        # Nach Fallback-Parsing nochmal prüfen
-        has_hashrate_key = any(
-            k.startswith(prefix) for k in summary for prefix in ["KHS", "GHS", "MHS"]
-        )
 
     if has_hashrate_key:
         for key_pattern, unit in [("KHS", "KH/s"), ("GHS", "GH/s"), ("MHS", "MH/s")]:
