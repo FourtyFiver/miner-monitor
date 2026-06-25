@@ -142,19 +142,9 @@ def extract_miner_data(host: str, port: int) -> dict | None:
     if not has_hashrate_key:
         for k, v in list(summary.items()):
             if k.startswith("SUMMARY") and "," in k:
-                # "SUMMARY,Elapsed=5044,GHS 5s=13.48,..." — der erste Teil vor = ist der Rest-Key
-                # Alles nach dem ersten = sind komma-getrennte Subfelder
-                eq_idx = v.find("=")
-                if eq_idx == -1:
-                    # Format: SUMMARY,Elapsed=5044,GHS 5s=13.48
-                    # Der Key ist "SUMMARY,Elapsed", Value ist "5044"
-                    # Aber die restlichen Felder stecken im Value
-                    pass
-                # Alternative: den ganzen Eintrag als CSV parsen
-                # "SUMMARY,Elapsed=5044,GHS 5s=13.48,GHS av=12.46,..."
-                # -> erstes Komma trennt "SUMMARY" vom Rest
-                rest = k[k.index(",")+1:]  # "Elapsed=5044,GHS 5s=13.48,..."
-                # Komma-getrennte Paare parsen
+                # Key ist "SUMMARY,Elapsed", Value ist "5044,GHS 5s=13.48,GHS av=12.46,..."
+                # Alles nach dem ersten = im Value sind die restlichen Felder
+                rest = v  # "5044,GHS 5s=13.48,GHS av=12.46,..."
                 pairs2 = rest.split(",")
                 for pair in pairs2:
                     if "=" in pair:
