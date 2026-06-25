@@ -587,7 +587,7 @@ class MQTTPublisher:
 
         # Online status
         self.client.publish(
-            f"{base}/online/state", str(data.get("online", False)), qos=0
+            f"{base}/online/state", str(data.get("online", False)), qos=1, retain=True
         )
 
         # Hashrate — normalize to KH/s for consistency
@@ -597,43 +597,43 @@ class MQTTPublisher:
             hr = hr * 1000  # MH/s → KH/s
         elif hr_unit == "GH/s":
             hr = hr * 1000 * 1000  # GH/s → KH/s
-        self.client.publish(f"{base}/hashrate/state", f"{hr:.2f}", qos=0)
+        self.client.publish(f"{base}/hashrate/state", f"{hr:.2f}", qos=1, retain=True)
 
-        self.client.publish(f"{base}/accepted/state", str(data.get("accepted", 0)), qos=0)
-        self.client.publish(f"{base}/rejected/state", str(data.get("rejected", 0)), qos=0)
-        self.client.publish(f"{base}/hw_errors/state", str(data.get("hw_errors", 0)), qos=0)
+        self.client.publish(f"{base}/accepted/state", str(data.get("accepted", 0)), qos=1, retain=True)
+        self.client.publish(f"{base}/rejected/state", str(data.get("rejected", 0)), qos=1, retain=True)
+        self.client.publish(f"{base}/hw_errors/state", str(data.get("hw_errors", 0)), qos=1, retain=True)
 
         if "temp_avg" in data:
-            self.client.publish(f"{base}/temp_avg/state", str(data["temp_avg"]), qos=0)
+            self.client.publish(f"{base}/temp_avg/state", str(data["temp_avg"]), qos=1, retain=True)
         if "temp_board_max" in data:
-            self.client.publish(f"{base}/temp_board/state", str(data["temp_board_max"]), qos=0)
+            self.client.publish(f"{base}/temp_board/state", str(data["temp_board_max"]), qos=1, retain=True)
         if "fan_speed" in data:
-            self.client.publish(f"{base}/fan_speed/state", str(data["fan_speed"]), qos=0)
+            self.client.publish(f"{base}/fan_speed/state", str(data["fan_speed"]), qos=1, retain=True)
 
         # XMRig-specific sensor states (conditional)
         if "hashrate_highest" in data:
             self.client.publish(
-                f"{base}/hashrate_highest/state", str(data["hashrate_highest"]), qos=0
+                f"{base}/hashrate_highest/state", str(data["hashrate_highest"]), qos=1, retain=True
             )
         if "pool_ping" in data:
-            self.client.publish(f"{base}/pool_ping/state", str(data["pool_ping"]), qos=0)
+            self.client.publish(f"{base}/pool_ping/state", str(data["pool_ping"]), qos=1, retain=True)
         if "load_average" in data:
             self.client.publish(
-                f"{base}/load_average/state", str(data["load_average"]), qos=0
+                f"{base}/load_average/state", str(data["load_average"]), qos=1, retain=True
             )
         if "uptime" in data:
-            self.client.publish(f"{base}/uptime/state", str(data["uptime"]), qos=0)
+            self.client.publish(f"{base}/uptime/state", str(data["uptime"]), qos=1, retain=True)
         if "cpu_brand" in data:
             self.client.publish(
-                f"{base}/cpu_brand/state", str(data["cpu_brand"]), qos=0
+                f"{base}/cpu_brand/state", str(data["cpu_brand"]), qos=1, retain=True
             )
         if "pool_url" in data:
-            self.client.publish(f"{base}/pool_url/state", str(data["pool_url"]), qos=0)
+            self.client.publish(f"{base}/pool_url/state", str(data["pool_url"]), qos=1, retain=True)
 
     def publish_availability(self, miner_name: str, online: bool):
         """Publish just the online/offline status."""
         base = f"{self.prefix}/sensor/{miner_name}"
-        self.client.publish(f"{base}/online/state", str(online), qos=0)
+        self.client.publish(f"{base}/online/state", str(online), qos=1, retain=True)
 
     def publish_offline_zero(self, miner_name: str):
         """Zero out all numeric sensors when a miner goes offline.
@@ -642,6 +642,8 @@ class MQTTPublisher:
         and XMRig-specific sensors (hashrate_highest, pool_ping,
         load_average, uptime) to 0 so HA doesn't show stale values.
         Text sensors (cpu_brand, pool_url) are cleared to empty string.
+        Uses retain=True so the zero persists in the MQTT broker
+        (HA reads retained state on reconnect/restart).
         """
         base = f"{self.prefix}/sensor/{miner_name}"
         numeric_sensors = [
@@ -650,10 +652,10 @@ class MQTTPublisher:
             "hashrate_highest", "pool_ping", "load_average", "uptime",
         ]
         for sensor in numeric_sensors:
-            self.client.publish(f"{base}/{sensor}/state", "0", qos=0)
+            self.client.publish(f"{base}/{sensor}/state", "0", qos=1, retain=True)
         # Text sensors leeren
         for sensor in ["cpu_brand", "pool_url"]:
-            self.client.publish(f"{base}/{sensor}/state", "", qos=0)
+            self.client.publish(f"{base}/{sensor}/state", "", qos=1, retain=True)
 
     def disconnect(self):
         self.client.publish(f"{self.prefix}/status", "offline", qos=1, retain=True)
