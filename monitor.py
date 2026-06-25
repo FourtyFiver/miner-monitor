@@ -179,6 +179,8 @@ def extract_miner_data(host: str, port: int) -> dict | None:
                 break
         data["accepted"] = int(summary.get("ACC", summary.get("Accepted", 0)))
         data["rejected"] = int(summary.get("REJ", summary.get("Rejected", 0)))
+        data["hw_errors"] = int(summary.get("Hardware Errors", summary.get("HW", 0)))
+        data["stale"] = int(summary.get("Stale", 0))
         data["elapsed"] = int(summary.get("UPTIME", 0))
         data["pool_alive"] = int(summary.get("POOLS", 0)) > 0
 
