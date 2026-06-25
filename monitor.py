@@ -182,8 +182,8 @@ def extract_miner_data(host: str, port: int) -> dict | None:
                     data["hashrate"] = val * 1000
                     data["hashrate_unit"] = "KH/s"
                 break
-        data["accepted"] = int(summary.get("ACC", 0))
-        data["rejected"] = int(summary.get("REJ", 0))
+        data["accepted"] = int(summary.get("ACC", summary.get("Accepted", 0)))
+        data["rejected"] = int(summary.get("REJ", summary.get("Rejected", 0)))
         data["elapsed"] = int(summary.get("UPTIME", 0))
         data["pool_alive"] = int(summary.get("POOLS", 0)) > 0
 
