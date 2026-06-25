@@ -24,6 +24,9 @@ import signal
 from pathlib import Path
 from typing import Any
 
+import urllib.request
+import urllib.error
+
 import paho.mqtt.client as mqtt
 import yaml
 
@@ -117,6 +120,109 @@ def cgminer_request(host: str, port: int, command: str, timeout: float = 5.0) ->
     except (socket.timeout, ConnectionRefusedError, OSError, json.JSONDecodeError) as exc:
         log.debug("cgminer request to %s:%s (%s) failed: %s", host, port, command, exc)
         return None
+
+
+# ── XMRig HTTP API ──────────────────────────────────────────────────────────
+
+
+def xmrig_http_request(
+    host: str, port: int, endpoint: str, token: str, timeout: float = 5.0
+) -> dict | None:
+    """Send an HTTP GET request to the XMRig API with Bearer token auth."""
+    url = f"http://{host}:{port}/1/{endpoint}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode())
+    except (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError) as exc:
+        log.debug("XMRig HTTP request to %s:%s/%s failed: %s", host, port, endpoint, exc)
+        return None
+
+
+def extract_xmrig_data(host: str, port: int, token: str) -> dict | None:
+    """Poll an XMRig miner via its HTTP API and return a flat dict of sensor values."""
+    summary = xmrig_http_request(host, port, "summary", token)
+    if not summary or summary.get("status") == "error":
+        return None
+
+    data: dict[str, Any] = {
+        "online": True,
+        "paused": summary.get("paused", False),
+    }
+
+    # Hashrate: hashrate.total is a list of 3 values [current, best, total]
+    hr_total = summary.get("hashrate", {}).get("total")
+    if hr_total and isinstance(hr_total, list) and len(hr_total) > 0:
+        data["hashrate"] = float(hr_total[0])
+    else:
+        # Fallback: use the sum of all thread hashrates
+        threads = summary.get("mining", {}).get("threads", [])
+        total_hr = sum(t.get("current", 0) for t in threads) if threads else 0
+        data["hashrate"] = float(total_hr)
+    data["hashrate_unit"] = "H/s"
+
+    # Peak hashrate
+    hr_highest = summary.get("hashrate", {}).get("highest")
+    if hr_highest is not None:
+        data["hashrate_highest"] = float(hr_highest)
+
+    # Shares
+    results = summary.get("results", {})
+    data["accepted"] = int(results.get("shares_good", 0))
+    data["rejected"] = int(results.get("shares_bad", 0))
+    # shares_total includes good + bad, rejected = total - good as alternative
+    if "shares_total" in results and "shares_good" in results:
+        rej = max(
+            int(results.get("shares_bad", 0)),
+            int(results["shares_total"]) - int(results["shares_good"]),
+        )
+        data["rejected"] = rej
+
+    data["hw_errors"] = 0
+
+    # Connection / pool info
+    conn = summary.get("connection", {})
+    if conn:
+        accepted_pool = conn.get("accepted")
+        rejected_pool = conn.get("rejected")
+        if accepted_pool is not None:
+            data["pool_accepted"] = int(accepted_pool)
+        if rejected_pool is not None:
+            data["pool_rejected"] = int(rejected_pool)
+        pool_url = conn.get("pool", "")
+        if pool_url:
+            data["pool_url"] = str(pool_url)
+        ping = conn.get("ping")
+        if ping is not None:
+            data["pool_ping"] = int(ping)
+
+    # Uptime
+    uptime = summary.get("uptime")
+    if uptime is not None:
+        data["uptime"] = int(uptime)
+
+    # CPU info
+    cpu = summary.get("cpu", {})
+    if cpu:
+        brand = cpu.get("brand", "")
+        if brand:
+            data["cpu_brand"] = str(brand)
+        threads_count = cpu.get("threads")
+        if threads_count is not None:
+            data["cpu_threads"] = int(threads_count)
+
+    # Resources
+    resources = summary.get("resources", {})
+    if resources:
+        load_avg = resources.get("load_average")
+        if load_avg and isinstance(load_avg, list) and len(load_avg) > 0:
+            data["load_average"] = float(load_avg[0])
+
+    return data
 
 
 # ── Miner data extraction ────────────────────────────────────────────────────
@@ -385,6 +491,50 @@ class MQTTPublisher:
                 "state_class": "measurement",
             }
 
+        # XMRig-specific sensors (conditional discovery)
+        if "hashrate_highest" in data:
+            sensors["hashrate_highest"] = {
+                "name": f"{miner_name} Peak Hashrate",
+                "unit_of_measurement": "H/s",
+                "icon": "mdi:speedometer",
+                "state_class": "measurement",
+            }
+        if "pool_ping" in data:
+            sensors["pool_ping"] = {
+                "name": f"{miner_name} Pool Ping",
+                "unit_of_measurement": "ms",
+                "icon": "mdi:lan",
+                "state_class": "measurement",
+            }
+        if "load_average" in data:
+            sensors["load_average"] = {
+                "name": f"{miner_name} Load Average",
+                "icon": "mdi:chart-line",
+                "state_class": "measurement",
+            }
+        if "uptime" in data:
+            sensors["uptime"] = {
+                "name": f"{miner_name} Uptime",
+                "unit_of_measurement": "s",
+                "icon": "mdi:clock",
+                "state_class": "measurement",
+            }
+
+        # XMRig text sensors (cpu_brand, pool_url) — published separately below
+        text_sensors: dict[str, dict] = {}
+        if "cpu_brand" in data:
+            text_sensors["cpu_brand"] = {
+                "name": f"{miner_name} CPU",
+                "icon": "mdi:cpu",
+                "device_class": "",
+            }
+        if "pool_url" in data:
+            text_sensors["pool_url"] = {
+                "name": f"{miner_name} Pool URL",
+                "icon": "mdi:server-network",
+                "device_class": "",
+            }
+
         # Binary sensor for online status
         binary_topic = f"{self.prefix}/binary_sensor/{miner_name}/online/config"
         binary_config = {
@@ -417,6 +567,20 @@ class MQTTPublisher:
             topic = f"{self.prefix}/sensor/{miner_name}/{sensor_key}/config"
             self.client.publish(topic, json.dumps(config), qos=1, retain=True)
 
+        # Publish XMRig text sensors (cpu_brand, pool_url) via homeassistant/text_sensor/
+        for tex_key, t_cfg in text_sensors.items():
+            text_config = {
+                **t_cfg,
+                "unique_id": f"miner_{miner_name}_{tex_key}",
+                "state_topic": f"{base}/{tex_key}/state",
+                "device": {
+                    "identifiers": [f"miner_{miner_name}"],
+                    "name": f"Miner {miner_name}",
+                },
+            }
+            text_topic = f"{self.prefix}/text_sensor/{miner_name}/{tex_key}/config"
+            self.client.publish(text_topic, json.dumps(text_config), qos=1, retain=True)
+
     def publish_state(self, miner_name: str, data: dict):
         """Publish current sensor values."""
         base = f"{self.prefix}/sensor/{miner_name}"
@@ -445,6 +609,26 @@ class MQTTPublisher:
             self.client.publish(f"{base}/temp_board/state", str(data["temp_board_max"]), qos=0)
         if "fan_speed" in data:
             self.client.publish(f"{base}/fan_speed/state", str(data["fan_speed"]), qos=0)
+
+        # XMRig-specific sensor states (conditional)
+        if "hashrate_highest" in data:
+            self.client.publish(
+                f"{base}/hashrate_highest/state", str(data["hashrate_highest"]), qos=0
+            )
+        if "pool_ping" in data:
+            self.client.publish(f"{base}/pool_ping/state", str(data["pool_ping"]), qos=0)
+        if "load_average" in data:
+            self.client.publish(
+                f"{base}/load_average/state", str(data["load_average"]), qos=0
+            )
+        if "uptime" in data:
+            self.client.publish(f"{base}/uptime/state", str(data["uptime"]), qos=0)
+        if "cpu_brand" in data:
+            self.client.publish(
+                f"{base}/cpu_brand/state", str(data["cpu_brand"]), qos=0
+            )
+        if "pool_url" in data:
+            self.client.publish(f"{base}/pool_url/state", str(data["pool_url"]), qos=0)
 
     def publish_availability(self, miner_name: str, online: bool):
         """Publish just the online/offline status."""
@@ -477,7 +661,13 @@ def load_miners() -> list[dict]:
 
     log.info("Loaded %d miner(s) from %s", len(miners), MINERS_FILE)
     for m in miners:
-        log.info("  - %s (%s:%s)", m["name"], m["host"], m.get("port", 4028))
+        miner_type = m.get("type", "cgminer")
+        has_token = bool(m.get("api_token"))
+        log.info(
+            "  - %s (%s:%s) type=%s api_token=%s",
+            m["name"], m["host"], m.get("port", 4028),
+            miner_type, "[set]" if has_token else "[none]",
+        )
     return miners
 
 
@@ -567,8 +757,14 @@ def main():
             name = miner["name"]
             host = miner["host"]
             port = miner.get("port", 4028)
+            miner_type = miner.get("type", "cgminer")
 
-            data = extract_miner_data(host, port)
+            # Dispatch to the right data extractor based on miner type
+            if miner_type == "xmrig":
+                token = miner.get("api_token", "")
+                data = extract_xmrig_data(host, port, token)
+            else:
+                data = extract_miner_data(host, port)
 
             if data is None:
                 if name in discovery_done:
@@ -590,11 +786,21 @@ def main():
             hr_unit = data.get("hashrate_unit", "KH/s")
             temp = data.get("temp_avg", "N/A")
             fan = data.get("fan_speed", "N/A")
-            log.info(
-                "✅ %s — %s %s | Temp: %s°C | Fan: %s RPM | Acc: %s | Rej: %s",
-                name, hr, hr_unit, temp, fan,
-                data.get("accepted", 0), data.get("rejected", 0),
-            )
+
+            if miner_type == "xmrig":
+                load_avg = data.get("load_average", "N/A")
+                uptime = data.get("uptime", "N/A")
+                log.info(
+                    "✅ %s — %s %s | Load: %s | Uptime: %ss | Acc: %s | Rej: %s",
+                    name, hr, hr_unit, load_avg, uptime,
+                    data.get("accepted", 0), data.get("rejected", 0),
+                )
+            else:
+                log.info(
+                    "✅ %s — %s %s | Temp: %s°C | Fan: %s RPM | Acc: %s | Rej: %s",
+                    name, hr, hr_unit, temp, fan,
+                    data.get("accepted", 0), data.get("rejected", 0),
+                )
 
         if not shutdown:
             time.sleep(poll_interval)

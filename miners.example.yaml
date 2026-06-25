@@ -1,11 +1,16 @@
 # Miner configuration
-# Add your miners here. The monitor polls each miner's cgminer/ccminer API.
-# cgminer default port: 4028, ccminer default port: 4068
+# Add your miners here. The monitor polls each miner's API.
+# Supported types: cgminer (default, port 4028), ccminer (port 4068), xmrig (HTTP API)
 miners:
-  - name: example_miner_1
+  # ── ASIC miner (cgminer/ccminer — default type, TCP binary API) ──
+  - name: example_asic
     host: 192.168.1.100
     port: 4028
+    # type: cgminer  # default, can be omitted
 
-  - name: example_miner_2
-    host: 192.168.1.101
-    port: 4068
+  # ── CPU miner (XMRig — HTTP API with Bearer token auth) ──
+  - name: example_xmrig
+    host: 192.168.1.200
+    port: 18088
+    type: xmrig
+    api_token: your_token_here
