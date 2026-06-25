@@ -635,6 +635,26 @@ class MQTTPublisher:
         base = f"{self.prefix}/sensor/{miner_name}"
         self.client.publish(f"{base}/online/state", str(online), qos=0)
 
+    def publish_offline_zero(self, miner_name: str):
+        """Zero out all numeric sensors when a miner goes offline.
+
+        Resets hashrate, accepted, rejected, hw_errors, temp, fan,
+        and XMRig-specific sensors (hashrate_highest, pool_ping,
+        load_average, uptime) to 0 so HA doesn't show stale values.
+        Text sensors (cpu_brand, pool_url) are cleared to empty string.
+        """
+        base = f"{self.prefix}/sensor/{miner_name}"
+        numeric_sensors = [
+            "hashrate", "accepted", "rejected", "hw_errors",
+            "temp_avg", "temp_board", "fan_speed",
+            "hashrate_highest", "pool_ping", "load_average", "uptime",
+        ]
+        for sensor in numeric_sensors:
+            self.client.publish(f"{base}/{sensor}/state", "0", qos=0)
+        # Text sensors leeren
+        for sensor in ["cpu_brand", "pool_url"]:
+            self.client.publish(f"{base}/{sensor}/state", "", qos=0)
+
     def disconnect(self):
         self.client.publish(f"{self.prefix}/status", "offline", qos=1, retain=True)
         self.client.disconnect()
@@ -769,6 +789,7 @@ def main():
             if data is None:
                 if name in discovery_done:
                     publisher.publish_availability(name, False)
+                    publisher.publish_offline_zero(name)
                 log.warning("⛔ %s (%s:%s) — OFFLINE", name, host, port)
                 continue
 
