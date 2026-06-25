@@ -182,6 +182,36 @@ def extract_miner_data(host: str, port: int) -> dict | None:
         data["rejected"] = int(summary.get("REJ", 0))
         data["elapsed"] = int(summary.get("UPTIME", 0))
         data["pool_alive"] = int(summary.get("POOLS", 0)) > 0
+
+        # Auch bei ccminer-Format: Stats für Temp/Fan abfragen
+        stats = cgminer_request(host, port, "stats")
+        if stats:
+            for k, v in stats.items():
+                if k.startswith("temp") and not k.startswith("temp2"):
+                    try:
+                        data.setdefault("temp_avg", 0)
+                        data.setdefault("temp_count", 0)
+                        data["temp_avg"] = data.get("temp_avg", 0) + int(v)
+                        data["temp_count"] = data.get("temp_count", 0) + 1
+                        data["temp_max"] = max(data.get("temp_max", 0), int(v))
+                    except (ValueError, TypeError):
+                        pass
+                if k.startswith("temp2_"):
+                    try:
+                        data.setdefault("temp_board_avg", 0)
+                        data.setdefault("temp_board_count", 0)
+                        data["temp_board_avg"] = data.get("temp_board_avg", 0) + int(v)
+                        data["temp_board_count"] = data.get("temp_board_count", 0) + 1
+                        data["temp_board_max"] = max(data.get("temp_board_max", 0), int(v))
+                    except (ValueError, TypeError):
+                        pass
+                if k.startswith("fan") and v and str(v).isdigit() and int(v) > 0:
+                    data["fan_speed"] = int(v)
+            if data.get("temp_count", 0) > 0:
+                data["temp_avg"] = round(data["temp_avg"] / data["temp_count"], 1)
+            if data.get("temp_board_count", 0) > 0:
+                data["temp_board_avg"] = round(data["temp_board_avg"] / data["temp_board_count"], 1)
+
         return data
 
     # cgminer JSON format
