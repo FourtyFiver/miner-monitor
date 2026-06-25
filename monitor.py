@@ -134,9 +134,10 @@ def extract_miner_data(host: str, port: int) -> dict | None:
 
     # ccminer text format: flat KEY=VALUE dict
     if "KHS" in summary or "GHS" in summary or "MHS" in summary:
-        for key, unit in [("KHS", "KH/s"), ("GHS", "GH/s"), ("MHS", "MH/s")]:
-            if key in summary:
-                val = float(summary.get(key, 0))
+        for key_pattern, unit in [("KHS", "KH/s"), ("GHS", "GH/s"), ("MHS", "MH/s")]:
+            matching_keys = [k for k in summary if k.startswith(key_pattern)]
+            if matching_keys:
+                val = float(summary.get(matching_keys[0], 0))
                 data["hashrate"] = val
                 data["hashrate_unit"] = unit
                 break
