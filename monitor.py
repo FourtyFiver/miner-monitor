@@ -762,6 +762,9 @@ def main():
     # Initial discovery
     discovery_done = set()
     poll_interval = mqtt_cfg["poll_interval"]
+    # Track consecutive offline counts per miner for debouncing
+    offline_counts: dict[str, int] = {}
+    OFFLINE_THRESHOLD = 3  # Only zero values after 3 consecutive failed polls
 
     # Handle graceful shutdown
     shutdown = False
@@ -789,14 +792,23 @@ def main():
                 data = extract_miner_data(host, port)
 
             if data is None:
-                # Always publish offline + zero values, even if discovery
-                # hasn't happened yet (e.g. miner was offline at container start).
-                # Discovery configs are retained in MQTT broker, so HA already
-                # knows the sensors — we just need to push the zero state.
-                publisher.publish_availability(name, False)
-                publisher.publish_offline_zero(name)
-                log.warning("⛔ %s (%s:%s) — OFFLINE", name, host, port)
+                offline_counts[name] = offline_counts.get(name, 0) + 1
+                count = offline_counts[name]
+                if count >= OFFLINE_THRESHOLD:
+                    # Sustained offline — publish offline + zero values.
+                    # Discovery configs are retained in MQTT broker, so HA
+                    # already knows the sensors — we just push the zero state.
+                    publisher.publish_availability(name, False)
+                    publisher.publish_offline_zero(name)
+                    log.warning("⛔ %s (%s:%s) — OFFLINE (%d consecutive)", name, host, port, count)
+                else:
+                    # Transient failure — don't zero out yet, just log
+                    log.warning("⚠️ %s (%s:%s) — poll failed (%d/%d), keeping last values",
+                                name, host, port, count, OFFLINE_THRESHOLD)
                 continue
+
+            # Miner is back online — reset counter
+            offline_counts[name] = 0
 
             # First discovery for this miner
             if name not in discovery_done:
