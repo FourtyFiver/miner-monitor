@@ -789,9 +789,12 @@ def main():
                 data = extract_miner_data(host, port)
 
             if data is None:
-                if name in discovery_done:
-                    publisher.publish_availability(name, False)
-                    publisher.publish_offline_zero(name)
+                # Always publish offline + zero values, even if discovery
+                # hasn't happened yet (e.g. miner was offline at container start).
+                # Discovery configs are retained in MQTT broker, so HA already
+                # knows the sensors — we just need to push the zero state.
+                publisher.publish_availability(name, False)
+                publisher.publish_offline_zero(name)
                 log.warning("⛔ %s (%s:%s) — OFFLINE", name, host, port)
                 continue
 
